@@ -1,16 +1,14 @@
 import datetime
-
+import requests
 import pandas as pd
 from bs4 import BeautifulSoup
-import time
-import urllib.request
-import pandas as ps
+import urllib.robotparser
 
-URI = "https://www.amazon.co.jp/gp/bestsellers/books/492352/"
+URI = "https://filmarks.com/list/now"
 
-book_info = []
+movie_info = []
 
-header = {
+headers = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     "Accept-Encoding": "gzip, deflate, br, zstd",
     "Accept-Language": "en-US,en;q=0.9,ja;q=0.8",
@@ -28,33 +26,56 @@ header = {
 
 # ページからhtmlを抜き出す
 def get_page(url):
-    html = urllib.request.urlopen(url)
-    soup = BeautifulSoup(html, "html.parser")
-    time.sleep(2)
+    response = requests.get(url=url, headers=headers)
+    ranking_page = response.text
+    soup = BeautifulSoup(ranking_page, "html.parser")
     return soup
 
-# 本の情報を辞書として格納
-def get_info(element):
-    book_info = {
-        "rank": element.select_one(".zg-bdg-text").getText(),
-        "title": element.select_one("div div a span div").getText().replace("\u3000", ""),
-        "author": element.select_one(".a-row .a-size-small div").getText().replace("\u3000", ""),
-        "price": element.select_one(".p13n-sc-price").getText(),
-        "link": "https://www.amazon.co.jp" + element.select_one(".a-link-normal").attrs["href"]
+# 映画の情報を辞書として格納
+def get_info(element, link):
+    movie_info = {
+        "title": element.select_one(".p-content-cassette__title").getText(),
+        "rating": element.select_one(".p-content-cassette__rate .c-rating__score").getText(),
+        "release_date": element.select_one(".up-screen_and_country span:first-of-type").getText(),
+        "countries": [country.getText() for country in element.select(".up-screen_and_country ul li")],
+        "length": element.select_one(".up-screen_and_country span:nth-of-type(2)").get_text(),
+        "genres": [genre.getText() for genre in element.select(".genres li")],
+        "link": link
     }
-    return book_info
+    return movie_info
 
-for n in range(1, 3):
-    url = URI + "?pg=" + str(n)
-    soup = get_page(url)
-    for element in soup.find_all(name="div", id="gridItemRoot"):
-        book_info.append(get_info(element))
+# robots.txtの読み取り
+robots_text_url = "https://filmarks.com/robots.txt"
+rp = urllib.robotparser.RobotFileParser()
+rp.set_url(robots_text_url)
+rp.read()
+
+# robots.txtの情報から調査したいURL、User-Agentでクローク可能か調べる
+user_agent = "*"
+url_to_check = "https://filmarks.com/list/now"
+result = rp.can_fetch(user_agent, url_to_check)
+
+# スクレイピングOKなら映画ランキングをスクレイピング
+if result:
+    for n in range(1, 3):
+        url = URI + "?page=" + str(n)
+        soup = get_page(url)
+        for element in soup.select(".p-content-cassette__info"):
+            # 作品詳細のリンクがない映画の対策
+            link_element = element.select_one(".p-content-cassette__people__readmore a")
+            if link_element:
+                link = "https://filmarks.com" + link_element.get("href")
+            else:
+                link = None
+
+            movie_info.append(get_info(element, link))
 
 today = datetime.datetime.now().strftime("%Y.%m.%d")
 
 # csvを出力
-df = pd.DataFrame(book_info)
-df.to_csv(f"AmazonITranking{today}.csv", encoding="utf-8_sig", index=False)
+df = pd.DataFrame(movie_info)
+df.index = df.index + 1
+df.to_csv(f"FilmarksRanking{today}.csv", encoding="utf-8_sig")
 
 
 
