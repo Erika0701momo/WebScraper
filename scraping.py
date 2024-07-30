@@ -10,6 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import datetime
 
 class Scraping:
@@ -53,13 +54,22 @@ class Scraping:
             'http2': False
         }
 
+        # 不要なリソースのブロック
+        caps = DesiredCapabilities.EDGE
+        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
+        caps = DesiredCapabilities.EDGE
+        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
         edge_options = webdriver.EdgeOptions()
-        # edge_options.add_argument("--headless")
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        edge_options.add_experimental_option("prefs", prefs)
+        edge_options.add_argument("--headless")
+        edge_options.add_argument("--disable-cache")
+
         edge_options.add_argument("--no-sandbox")
         edge_options.add_argument("--disable-dev-shm-usage")
         edge_options.add_argument("--disable-gpu")
         edge_options.add_argument("--window-size=1920,1080")
-        self.driver = webdriver.Edge(options=edge_options)
+        self.driver = webdriver.Edge(capabilities=caps, options=edge_options)
         self.driver.request_interceptor = self.interceptor
 
 
@@ -70,17 +80,13 @@ class Scraping:
         self.driver.get(url)
         try:
             print(f"element取得前{datetime.datetime.now()}")
-            elements = self.driver.find_elements(By.CSS_SELECTOR, ".p-content-cassette__info")
+            element = self.driver.find_element(By.CSS_SELECTOR, ".p-content-cassette__info")
             print(f"element取得後{datetime.datetime.now()}")
-            if len(elements) == 0:
-                self.driver.quit()
-                self.done = True
-                print("elementが0だったのでquitしました")
         except NoSuchElementException:
             print("エレメントがありません")
+            self.done = True
             self.driver.quit()
             print("quitしました")
-            self.done = True
         print(f"get後{datetime.datetime.now()}")
 
     # 映画の情報を辞書として格納
@@ -113,7 +119,7 @@ class Scraping:
     def get_movie_data(self, is_scraping_ok, page_choice):
         # スクレイピングOKなら映画ランキングをスクレイピング
         if is_scraping_ok:
-            page = 1
+            page = 14
             while True:
                 try:
                     url = self.URI[page_choice] + "?page=" + str(page)
@@ -141,6 +147,7 @@ class Scraping:
                 except Exception as e:
                     print(e)
                     self.driver.quit()
+                    break
 
                 page += 1
 
