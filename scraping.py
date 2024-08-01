@@ -1,93 +1,97 @@
-import datetime
-import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 import urllib.robotparser
 from seleniumwire import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-# from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import NoSuchElementException
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import datetime
+import traceback
 
 class Scraping:
-    def __init__(self):
+    def __init__(self, page_choice):
         self.URI = {"公開中": "https://filmarks.com/list/now", "公開予定":"https://filmarks.com/list/coming"}
         self.movie_info = []
         self.today = datetime.datetime.now().strftime("%Y.%m.%d")
-        self.done = False
+        # 全件取得したかどうかのフラグ
+        self.is_done = False
         self.PROXY = "<http://localhost:8080>"
+        # 公開中または公開予定、どちらかを選ぶ
+        self.page_choice = page_choice
+        self.movie_numbers_of_filmarks = None
+        self.diver = None
+
     # ヘッダーをconfigureするためのリクエストインターセプタを定義
     def interceptor(self, request):
-        # request.headers["Accept-Language"] = "en-US,en;q=0.9,ja;q=0.8"
-        # request.headers["Referer"] = "https://www.google.com/"
+        request.headers["Accept-Language"] = "en-US,en;q=0.9,ja;q=0.8"
+        request.headers["Referer"] = "https://www.google.com/"
 
         del request.headers["User-Agent"]
-        # del request.headers["Sec-Ch-Ua"]
-        # del request.headers["Sec-Fetch-Site"]
-        # del request.headers["Accept-Encoding"]
+        del request.headers["Sec-Ch-Ua"]
+        del request.headers["Sec-Fetch-Site"]
+        del request.headers["Accept-Encoding"]
 
         request.headers[
             "User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        # request.headers["Sec-Ch-Ua"] = "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\""
-        # request.headers["Sec-Fetch-Site"] = "cross-site"
-        # request.headers["Accept-Encoding"] = "gzip, deflate, br, zstd"
-
-    def get_pace_choice(self):
-        page_choice = input(
-            "公開中の映画ランキングを取得するには「公開中」、公開予定の映画ランキングを取得するには「公開予定」とタイプしてください>>")
-        while page_choice not in ["公開中", "公開予定"]:
-            page_choice = input("公開中か公開予定かをタイプしてください>>")
-            if page_choice in ["公開中", "公開予定"]:
-                break
-        return page_choice
+        request.headers["Sec-Ch-Ua"] = "\"Not/A)Brand\";v=\"8\", \"Chromium\";v=\"126\", \"Google Chrome\";v=\"126\""
+        request.headers["Sec-Fetch-Site"] = "cross-site"
+        request.headers["Accept-Encoding"] = "gzip, deflate, br, zstd"
 
     def initialize_driver(self):
         # プロキシ設定
-        webdriver.DesiredCapabilities.EDGE["proxy"] = {
+        webdriver.DesiredCapabilities.CHROME["proxy"] = {
             'proxyType': 'MANUAL',
             'httpProxy': self.PROXY,
             'sslProxy': self.PROXY,
             'http2': False
         }
 
-        # 不要なリソースのブロック
-        caps = DesiredCapabilities.EDGE
-        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
-        caps = DesiredCapabilities.EDGE
-        caps['goog:loggingPrefs'] = {'performance': 'ALL'}
-        edge_options = webdriver.EdgeOptions()
-        prefs = {"profile.managed_default_content_settings.images": 2}
-        edge_options.add_experimental_option("prefs", prefs)
-        edge_options.add_argument("--headless")
-        edge_options.add_argument("--disable-cache")
+        # オプション設定
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+        prefs = {"profile.managed_default_content_settings.images": 2,
+                 "profile.managed_default_content_settings.stylesheets": 2,  # スタイルシートを読み込まない
+                 "profile.managed_default_content_settings.cookies": 2,  # クッキーを無効にする
+                 "profile.managed_default_content_settings.plugins": 2,  # プラグインを無効にする
+                 "profile.managed_default_content_settings.popups": 2,  # ポップアップを無効にする
+                 "profile.managed_default_content_settings.geolocation": 2,  # 位置情報を無効にする
+                 "profile.managed_default_content_settings.notifications": 2,  # 通知を無効にする
+                 "profile.managed_default_content_settings.automatic_downloads": 2  # 自動ダウンロードを無効にする
+                 }
+        chrome_options.add_experimental_option("prefs", prefs)
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--disable-cache")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--remote-debugging-port=9222")
 
-        edge_options.add_argument("--no-sandbox")
-        edge_options.add_argument("--disable-dev-shm-usage")
-        edge_options.add_argument("--disable-gpu")
-        edge_options.add_argument("--window-size=1920,1080")
-        self.driver = webdriver.Edge(capabilities=caps, options=edge_options)
+        # DOMにはアクセスできる状態まで待つ
+        chrome_options.page_load_strategy = "eager"
+
+        self.driver = webdriver.Chrome(options=chrome_options)
         self.driver.request_interceptor = self.interceptor
 
 
     # ページからhtmlを抜き出す
     def get_page(self,url):
-        self.driver.implicitly_wait(30)
-        print(f"get開始前{datetime.datetime.now()}")
+        self.driver.implicitly_wait(10)
         self.driver.get(url)
         try:
-            print(f"element取得前{datetime.datetime.now()}")
             element = self.driver.find_element(By.CSS_SELECTOR, ".p-content-cassette__info")
-            print(f"element取得後{datetime.datetime.now()}")
         except NoSuchElementException:
-            print("エレメントがありません")
-            self.done = True
-            self.driver.quit()
-            print("quitしました")
-        print(f"get後{datetime.datetime.now()}")
+            self.is_done = True
+            if self.movie_numbers_of_filmarks == len(self.movie_info):
+                print("映画データを全件分取得しました")
+            else:
+                print("申し訳ありません、映画データを全件分取得できませんでした")
+        except Exception as e:
+            print(f"ページ読み込みの際にエラーが発生しました: {e}")
+            print(traceback.format_exc())
+            self.is_done = True
+        finally:
+            if self.is_done:
+                self.driver.quit()
 
     # 映画の情報を辞書として格納
     def get_info(self, element, link, length):
@@ -112,22 +116,26 @@ class Scraping:
 
         # robots.txtの情報から調査したいURL、User-Agentでクローク可能か調べる
         user_agent = "*"
-        url_to_check = "https://filmarks.com/list/now"
+        url_to_check = self.URI[self.page_choice]
         is_scraping_ok = rp.can_fetch(user_agent, url_to_check)
         return is_scraping_ok
 
-    def get_movie_data(self, is_scraping_ok, page_choice):
+    def get_movie_data(self, is_scraping_ok):
         # スクレイピングOKなら映画ランキングをスクレイピング
         if is_scraping_ok:
-            page = 14
+            page = 1
             while True:
                 try:
-                    url = self.URI[page_choice] + "?page=" + str(page)
+                    print(f"{page}ページ目取得中")
+                    url = self.URI[self.page_choice] + "?page=" + str(page)
                     self.get_page(url)
-                    if self.done:
+                    if self.is_done:
                         break
                     soup = BeautifulSoup(self.driver.page_source, "html.parser")
-                    print(page)
+
+                    # 映画の全件数取得
+                    self.movie_numbers_of_filmarks = int(soup.select_one(".c-heading-1 span").getText().split()[1].split("作品")[0])
+
                     for element in soup.select(".p-content-cassette__info"):
                         # 作品詳細のリンクがない映画の対策
                         link_element = element.select_one(".p-content-cassette__people__readmore a")
@@ -141,24 +149,32 @@ class Scraping:
                             length = length_element.getText()
                         else:
                             length = None
-                        movie = self.get_info(element, link, length)
-                        print(movie["title"])
+
                         self.movie_info.append(self.get_info(element, link, length))
+
                 except Exception as e:
-                    print(e)
                     self.driver.quit()
+                    print(f"映画データ取得中にエラーが発生しました: {e}")
                     break
 
                 page += 1
 
 
-    def make_csv(self, page_choice):
+    def make_csv(self):
          # csvを出力
         df = pd.DataFrame(self.movie_info)
         df.index = df.index + 1
-        df.to_csv(f"{page_choice}Filmarksランキング{self.today}.csv", encoding="utf-8_sig")
+        df.to_csv(f"{self.page_choice}Filmarksランキング{self.today}.csv", encoding="utf-8_sig")
 
+    def make_dataframe(self):
+        # dfを作成
+        df = pd.DataFrame(self.movie_info)
+        return df
 
-
-
-
+    def scrape_filmarks_movies(self):
+        """
+        Filmarksから映画データを取得する処理をまとめた関数
+        """
+        is_scraping_ok = self.check_scraping_ok()
+        self.initialize_driver()
+        self.get_movie_data(is_scraping_ok)
