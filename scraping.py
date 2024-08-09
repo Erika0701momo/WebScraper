@@ -33,7 +33,7 @@ class Scraping:
         self.today = datetime.datetime.now().strftime("%Y.%m.%d")
         # 全件取得したかどうかのフラグ
         self.is_done = False
-        self.PROXY = "<http://localhost:8080>"
+        self.PROXY = "http://localhost:8080"
         # 公開中または公開予定、どちらかを選ぶ
         self.page_choice = page_choice
         self.movie_numbers_of_filmarks = None
@@ -88,9 +88,10 @@ class Scraping:
         chrome_options.add_argument("--disable-cache")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--disable-proxy-certificate-handler")
+        chrome_options.add_argument("--log-level=3")
 
         # DOMにはアクセスできる状態まで待つ
         chrome_options.page_load_strategy = "eager"
@@ -102,7 +103,7 @@ class Scraping:
 
     # ページからhtmlを抜き出す
     def get_page(self, url):
-        self.driver.implicitly_wait(5)
+        self.driver.implicitly_wait(10)
         self.driver.get(url)
         try:
             self.is_elem_available = True
